@@ -4547,6 +4547,8 @@ rl.on("line", (line) => {
       }
       return { body: { jsonrpc: "2.0", id: request.body?.id, result: { content: [{ type: "text", text: "ok" }] } } };
     });
+    let callA: Promise<unknown> | undefined;
+    let callB: Promise<unknown> | undefined;
     try {
       const { connection } = await createRemoteMcpTool(db, company.id, {
         applicationKey: "overlapping-sessions",
@@ -4563,7 +4565,7 @@ rl.on("line", (line) => {
         .find((tool) => tool.providerType === "mcp_remote_http");
       expect(connectedTool).toBeTruthy();
 
-      const callA = gateway.executeTool({
+      callA = gateway.executeTool({
         sessionToken: sessionA.token,
         tool: connectedTool!.name,
         parameters: { key: "everything" },
@@ -4574,7 +4576,7 @@ rl.on("line", (line) => {
         (error) => expectGatewayError(error, 502, "mcp_remote_response_too_large"),
       );
       await oversizedCallStarted;
-      const callB = gateway.executeTool({
+      callB = gateway.executeTool({
         sessionToken: sessionB.token,
         tool: connectedTool!.name,
         parameters: { key: "page-1" },
@@ -4591,6 +4593,10 @@ rl.on("line", (line) => {
         .map((request) => request.headers["mcp-session-id"]);
       expect(toolCallSessionIds).toEqual(["session-1", "session-2"]);
     } finally {
+      // Open both gates and settle both calls so a failed assertion can't leave a fake-server request hanging.
+      markSecondInitializeStarted();
+      releaseSecondInitialize();
+      await Promise.allSettled([callA, callB]);
       await fake.close();
     }
   });
