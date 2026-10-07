@@ -1375,6 +1375,11 @@ if the user has already answered the interaction. It replays retained accounting
 through the ordinary control-plane observers without starting another model turn.
 When a later heartbeat run reuses the provider session, it clears that prior
 run's wait marker along with its terminal, result and pending-request authority.
+Already-numbered cancellation acknowledgements and cancelled/expired runtime requests
+are retained during shutdown so recovery can replay a contiguous journal. They
+carry no permission to start work. Stream closure, stream failure or drain timeout
+after complete usage leaves the saved wait unfinalized until a provider terminal
+is retained; complete token counters alone cannot certify a stopped provider.
 A timeout, missing accounting, or an unproven provider terminal remains a failure;
 the saved wait does not certify successful provider execution.
 

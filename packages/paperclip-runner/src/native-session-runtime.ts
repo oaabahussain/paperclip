@@ -967,7 +967,13 @@ async function consumeTurn(
           const trailing = next.value;
           const terminal = isTurnTerminal(trailing);
           const usage = trailing.eventType === "item.completed" && trailing.payload.kind === "usage";
-          if (trailing.turnId === event.turnId && (usage || terminal)) {
+          // These already-numbered cancellation facts carry no new work
+          // authority. Retain them so later receipts have contiguous replay.
+          const cancellation = trailing.eventType === "runtime_request.cancelled"
+            || trailing.eventType === "runtime_request.expired"
+            || (trailing.eventType === "item.completed" && trailing.payload.kind === "interrupt_acknowledgement")
+            || (trailing.eventType === "run.terminal" && ["failed", "cancelled"].includes(String(trailing.payload.runTerminalState)));
+          if (trailing.turnId === event.turnId && (usage || terminal || cancellation)) {
             const receipt = await controlPlane.appendEvent(trailing, { signal: drainAbort.signal });
             if (drainAbort.signal.aborted) return;
             eventCount += receipt.disposition === "committed" ? 1 : 0;
@@ -997,6 +1003,12 @@ async function consumeTurn(
         appendAbort.signal.removeEventListener("abort", stopDrain);
         drainAbort.abort();
       });
+      // A durable wait and complete usage cannot prove that the provider
+      // stopped. Leave the journaled wait recoverable, without a successful
+      // result or an accounting-completion boundary, if shutdown is unproven.
+      if (!governedProviderTerminalObserved) {
+        throw new NativeProviderTerminalFailure("governed_wait_provider_terminal_unproven", false);
+      }
       return {
         event,
         eventCount,
