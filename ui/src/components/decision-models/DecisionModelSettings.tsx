@@ -93,7 +93,10 @@ export function DecisionModelSettingsSection({ companyId }: { companyId: string 
   const [adding, setAdding] = useState(false);
   const [provider, setProvider] = useState<DecisionProvider | null>(null);
   const [newlyConnectedId, setNewlyConnectedId] = useState<string | null>(null);
-  const test = useMutation({ mutationFn: () => decisionModelsApi.test(companyId), onSettled: () => { void client.invalidateQueries({ queryKey: ["decision-history", companyId] }); void client.invalidateQueries({ predicate: q => String(q.queryKey[0]).includes("cost") }); } });
+  const settingsRevision = JSON.stringify(query.data?.settings ?? { companyId });
+  const test = useMutation({ mutationFn: (_revision: string) => decisionModelsApi.test(companyId), onSettled: () => { void client.invalidateQueries({ queryKey: ["decision-history", companyId] }); void client.invalidateQueries({ predicate: q => String(q.queryKey[0]).includes("cost") }); } });
+  const resetTest = test.reset;
+  useEffect(() => { resetTest(); }, [settingsRevision, resetTest]);
   const save = useMutation({ mutationFn: (settings: UpdateDecisionModel) => decisionModelsApi.update(companyId, settings), onSuccess: settings => {
     setNewlyConnectedId(null); test.reset(); client.setQueryData(key, { ...query.data, settings });
   } });
@@ -102,8 +105,9 @@ export function DecisionModelSettingsSection({ companyId }: { companyId: string 
   if (!query.data?.canManage || !query.data.settings) return null;
   return <>
     <DecisionModelSettingsView settings={query.data.settings} choices={query.data.choices} saving={save.isPending} testing={test.isPending}
-      error={save.error?.message ?? test.error?.message} result={test.data} newlyConnectedId={newlyConnectedId}
-      onSave={value => save.mutate(value)} onTest={() => test.mutate()} onAdd={() => { setProvider(null); setAdding(true); }} />
+      error={save.error?.message ?? (test.variables === settingsRevision ? test.error?.message : undefined)}
+      result={test.variables === settingsRevision ? test.data : null} newlyConnectedId={newlyConnectedId}
+      onSave={value => save.mutate(value)} onTest={() => test.mutate(settingsRevision)} onAdd={() => { setProvider(null); setAdding(true); }} />
     <Dialog open={adding} onOpenChange={setAdding}>
       <DialogContent className="sm:max-w-2xl max-h-(--sz-85vh) overflow-y-auto">
         <DialogHeader><DialogTitle>Add a decision connection</DialogTitle><DialogDescription>Use a shared API connection for company decisions.</DialogDescription></DialogHeader>

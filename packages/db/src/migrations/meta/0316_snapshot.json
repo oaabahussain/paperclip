@@ -1,6 +1,6 @@
 {
-  "id": "9e2b488c-b693-4e81-81c6-210cbb77f1ca",
-  "prevId": "833d46ef-bbe8-442f-bcc1-085576aae1bc",
+  "id": "2242ec8f-2d13-46d2-99ed-cf97a52466d2",
+  "prevId": "26691ae0-39a8-42ac-868d-e36ab7219073",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -52028,6 +52028,129 @@
           "tableTo": "agents",
           "columnsFrom": [
             "created_by_agent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.user_company_preferences": {
+      "name": "user_company_preferences",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "company_id": {
+          "name": "company_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "primary_agent_id": {
+          "name": "primary_agent_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "primary_agent_initialized": {
+          "name": "primary_agent_initialized",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "user_company_preferences_company_user_uq": {
+          "name": "user_company_preferences_company_user_uq",
+          "columns": [
+            {
+              "expression": "company_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "user_company_preferences_primary_agent_idx": {
+          "name": "user_company_preferences_primary_agent_idx",
+          "columns": [
+            {
+              "expression": "primary_agent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "user_company_preferences_company_id_companies_id_fk": {
+          "name": "user_company_preferences_company_id_companies_id_fk",
+          "tableFrom": "user_company_preferences",
+          "tableTo": "companies",
+          "columnsFrom": [
+            "company_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "user_company_preferences_primary_agent_id_agents_id_fk": {
+          "name": "user_company_preferences_primary_agent_id_agents_id_fk",
+          "tableFrom": "user_company_preferences",
+          "tableTo": "agents",
+          "columnsFrom": [
+            "primary_agent_id"
           ],
           "columnsTo": [
             "id"
