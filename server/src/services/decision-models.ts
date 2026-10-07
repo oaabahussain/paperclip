@@ -180,7 +180,7 @@ export function decisionModelService(db: Db, options: { provider?: typeof runDec
     let credential: string;
     try { credential = await aiConnectionService(db).credential(selected.connection, 0, { responsibleUserId: selected.userId,
       actorType: selected.actorType, actorId: selected.actorId, issueId: selected.issueId, heartbeatRunId: selected.runId }); }
-    catch (error) { const reason = unavailableReason(error); if (reason) return { status: "unavailable", reason }; throw error; }
+    catch (error) { return { status: "unavailable", reason: unavailableReason(error) ?? "connection_unavailable" }; }
     const admission = await withAccountingTransaction(db, context.companyId, async (tx, publications) => {
       let current: Awaited<ReturnType<typeof resolve>>;
       try { current = await resolve(context, tx); }

@@ -46,6 +46,9 @@ function Journey({ alreadyConfigured = false }: { alreadyConfigured?: boolean })
         if (report === "finance-summary") return Response.json({ companyId, currency: "USD", currencies: [], debitCents: 0,
           creditCents: 0, netCents: 0, estimatedDebitCents: 0, eventCount: 0 });
         if (report === "by-user") return Response.json({ activeUserCount: 1, rows: [] });
+        if (report === "by-agent") return Response.json(history.length ? [{ agentId: null, agentName: null, agentStatus: null,
+          eventCount: history.length, estimatedEventCount: history.length, costCents: history.length * Number(entry.costCents),
+          inputTokens: history.length * entry.inputTokens!, cachedInputTokens: 0, outputTokens: 0 }] : []);
         return Response.json([]);
       }
       return original(input, init);

@@ -1,14 +1,14 @@
 import { sql } from "drizzle-orm";
 import { boolean, check, index, integer, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { companies } from "./companies.js";
-import { toolConnections } from "./tool_access.js";
-import { connectionGrants } from "./tool_access.js";
 import { costEvents } from "./cost_events.js";
 
 export const companyDecisionModels = pgTable("company_decision_models", {
   companyId: uuid("company_id").primaryKey().references(() => companies.id, { onDelete: "cascade" }),
-  connectionId: uuid("connection_id").references(() => toolConnections.id, { onDelete: "cascade" }),
-  grantId: uuid("grant_id").references(() => connectionGrants.id, { onDelete: "cascade" }),
+  // Retain company preferences when a connection/grant is deleted. Resolution
+  // fails closed for stale IDs; choosing a replacement preserves sponsorship.
+  connectionId: uuid("connection_id"),
+  grantId: uuid("grant_id"),
   enabled: boolean("enabled").notNull().default(false),
   allowBackground: boolean("allow_background").notNull().default(true),
   provider: text("provider"),

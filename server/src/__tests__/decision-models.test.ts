@@ -113,6 +113,17 @@ describe("company decision service", () => {
     await f.service.configure(f.companyId, "alice", { ...f.config, enabled: false });
     expect(await f.service.availability(f.context)).toEqual({ available: false, reason: "disabled" }); expect(f.provider).not.toHaveBeenCalled();
   });
+  it("preserves sponsorship off when a deleted grant is replaced", async () => {
+    const f = await fixture();
+    await f.service.configure(f.companyId, "alice", { ...f.config, allowBackground: false });
+    await db.delete(connectionGrants).where(eq(connectionGrants.id, f.binding.grantId));
+    expect(await f.service.availability(f.context)).toMatchObject({ available: false, reason: "connection_unavailable" });
+    expect((await f.service.settings(f.companyId)).allowBackground).toBe(false);
+    const next = await f.connections.save(f.companyId, "alice", { provider: "openrouter", method: "api_key", name: "Replacement", ownership: "shared", apiKey: "other", agentIds: [], allAgents: true }, "other");
+    await f.service.configure(f.companyId, "alice", { ...next, enabled: true });
+    expect((await f.service.settings(f.companyId)).allowBackground).toBe(false);
+    expect(f.provider).not.toHaveBeenCalled();
+  });
   it("rejects foreign-company credentials, membership loss, and invented feature handles", async () => {
     const f = await fixture(), other = await fixture();
     await expect(f.service.configure(f.companyId, "alice", { ...other.config })).rejects.toThrow();
