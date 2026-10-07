@@ -268,6 +268,12 @@ describe("Shared Costs surfaces", () => {
     await vi.waitFor(() => expect(notice.textContent).toContain("Costs are unavailable for 10 usage entries"));
     expect(notice.textContent).not.toContain("awaiting cost data");
     expect(notice.textContent).not.toContain("0 runs");
+    costsApiMocks.summary.mockResolvedValue({ spendCents: 12.4, budgetCents: 0, pricingComplete: false, unpricedEventCount: 0, pendingRunCount: 1 });
+    await act(async () => { await queryClient.invalidateQueries(); });
+    await vi.waitFor(() => expect(notice.textContent).toBe("1 run is awaiting cost data."));
+    costsApiMocks.summary.mockResolvedValue({ spendCents: 12.4, budgetCents: 0, pricingComplete: true, unpricedEventCount: 0, pendingRunCount: 0 });
+    await act(async () => { await queryClient.invalidateQueries(); });
+    await vi.waitFor(() => expect(container.contains(notice)).toBe(false));
   });
 
   it.each(surfaces)("labels each agent and expanded model independently on the %s page", async (_name, props) => {
