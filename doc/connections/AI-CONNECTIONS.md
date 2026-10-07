@@ -61,10 +61,13 @@ a compatible choice. Agent configuration cannot grant access to another account.
 
 On agent update, `runtimeConfig.aiConnection` uses absent-versus-null semantics.
 An update that omits the key preserves the stored binding. An update that sends
-`null` detaches it. A harness switch drops a stored binding that has no
-compatible path on the target harness instead of rejecting the whole update.
-A save that keeps the current harness still rejects an incompatible binding,
-so the caller learns the binding no longer fits the model.
+`null` detaches it. A harness switch drops a stored non-router binding that has
+no compatible path on the target harness instead of rejecting the whole update.
+Router pool bindings keep strict validation: switching to a harness the pool
+cannot serve is rejected until the caller detaches it explicitly by sending
+`runtimeConfig.aiConnection: null` in the same update. A save that keeps the
+current harness still rejects an incompatible binding, so the caller learns
+the binding no longer fits the model.
 
 Personal defaults are unique per company, user, and provider. A Claude bot can use one user’s subscription and another user’s API key without changing its harness or model. Explicit shared selections remain pinned to the selected account and method.
 The first successful personal connection sets a default only when none exists.
