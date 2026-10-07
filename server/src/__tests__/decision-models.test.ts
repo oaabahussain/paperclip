@@ -93,6 +93,19 @@ describe("company decision service", () => {
     expect(await f.service.decide({ ...f.context, feature: backgroundFeature }, DECISION_TEST_REQUEST)).toMatchObject({ status: "unavailable", reason: "access_denied" });
     expect(f.provider).toHaveBeenCalledTimes(1);
   });
+  it("retains the charge and dispatch snapshot when the task is deleted during provider work", async () => {
+    const f = await fixture(), issueId = randomUUID();
+    await db.insert(issues).values({ id: issueId, companyId: f.companyId, title: "Temporary task" });
+    f.provider.mockImplementationOnce(async () => {
+      await db.delete(issues).where(eq(issues.id, issueId));
+      return structuredClone(outcome);
+    });
+    expect((await f.service.decide({ ...f.context, issueId }, DECISION_TEST_REQUEST)).status).toBe("succeeded");
+    const [event] = await db.select().from(costEvents).where(eq(costEvents.companyId, f.companyId));
+    expect(event).toMatchObject({ issueId: null, costCents: 0.001 });
+    const [invocation] = await db.select().from(decisionInvocations).where(eq(decisionInvocations.companyId, f.companyId));
+    expect(invocation).toMatchObject({ issueId, status: "succeeded", costEventId: event.id });
+  });
   it("rechecks revoked grants after availability, and can disable a revoked connection", async () => {
     const f = await fixture(); expect(await f.service.availability(f.context)).toEqual({ available: true });
     await db.update(connectionGrants).set({ status: "revoked" }).where(eq(connectionGrants.id, f.binding.grantId));

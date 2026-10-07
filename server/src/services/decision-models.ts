@@ -142,16 +142,24 @@ export function decisionModelService(db: Db, options: { provider?: typeof runDec
       const [current] = await tx.select().from(decisionInvocations).where(and(eq(decisionInvocations.companyId, invocation.companyId), eq(decisionInvocations.id, invocation.id))).for("update");
       if (!current || current.status !== "running") return;
       const receipt = outcome.receipt;
+      // Keep dispatch identity on the invocation even if its task or agent was
+      // deleted while the provider worked. Ledger foreign keys use live rows.
+      const links: { agentId: string | null; issueId: string | null; projectId: string | null } = { agentId: null, issueId: null, projectId: null };
+      for (const [key, table] of [["agentId", agents], ["issueId", issues], ["projectId", projects]] as const) {
+        const id = invocation[key];
+        if (!id) continue;
+        const [row] = await tx.select({ id: table.id }).from(table).where(and(eq(table.id, id), eq(table.companyId, invocation.companyId))).for("key share");
+        if (row) links[key] = row.id;
+      }
       const event = await createCostEventInTransaction(tx, invocation.companyId, {
-        usageKind: "decision", responsibleUserId: invocation.responsibleUserId, agentId: invocation.agentId,
-        issueId: invocation.issueId, projectId: invocation.projectId,
+        usageKind: "decision", responsibleUserId: invocation.responsibleUserId, ...links,
         // Run attribution lives on the invocation. Run receipt reconciliation must not ingest this independent charge.
         heartbeatRunId: null, idempotencyKey: `decision:${invocation.id}`,
         provider: invocation.provider === "openrouter" ? "typesafe" : "openai", biller: invocation.provider,
         billingType: "metered_api", costStatus: receipt.costStatus, model: invocation.model,
         inputTokens: receipt.inputTokens ?? 0, outputTokens: receipt.outputTokens ?? 0, costCents: receipt.costCents ?? "0",
         providerRequestId: receipt.providerRequestId, pricingProvenance: receipt.pricingProvenance, occurredAt: invocation.startedAt,
-      }, publications, { actorType: invocation.actorType as "system" | "user" | "agent", actorId: invocation.actorId, agentId: invocation.agentId });
+      }, publications, { actorType: invocation.actorType as "system" | "user" | "agent", actorId: invocation.actorId, agentId: links.agentId });
       const finishedAt = new Date();
       await tx.update(decisionInvocations).set({ status: outcome.answers ? "succeeded" : receipt.costStatus === "unpriced" ? "unknown" : "failed",
         errorCode: outcome.errorCode ?? null, costEventId: event.id, providerRequestId: receipt.providerRequestId,
