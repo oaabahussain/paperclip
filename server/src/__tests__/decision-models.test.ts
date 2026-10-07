@@ -17,6 +17,7 @@ import { decisionModelService, settingsDecisionTest, defineDecisionFeature, type
 import { decisionReceipt, type DecisionProviderOutcome } from "../services/decision-model-provider.js";
 import { costService } from "../services/costs.js";
 import { billingReconciliationService } from "../services/billing-reconciliation.js";
+import { withAccountingTransaction } from "../services/accounting-transaction.js";
 import express from "express";
 import request from "supertest";
 import { decisionModelRoutes } from "../routes/decision-models.js";
@@ -113,6 +114,29 @@ describe("company decision service", () => {
     expect(await f.service.decide(f.context, DECISION_TEST_REQUEST)).toMatchObject({ status: "unavailable", reason: "connection_unavailable" });
     await f.service.configure(f.companyId, "alice", { ...f.config, enabled: false });
     expect(await f.service.availability(f.context)).toEqual({ available: false, reason: "disabled" }); expect(f.provider).not.toHaveBeenCalled();
+  });
+  it.each(["disabled", "rotated"])("rejects a secret %s while admission waits for accounting", async change => {
+    const f = await fixture();
+    const [secret] = await db.select().from(companySecrets).where(eq(companySecrets.companyId, f.companyId));
+    let release!: () => void, locked!: (pid: number) => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const acquired = new Promise<number>(resolve => { locked = resolve; });
+    const holding = withAccountingTransaction(db, f.companyId, async tx => {
+      const [row] = await tx.execute<{ pid: number }>(sql`select pg_backend_pid() as pid`);
+      locked(row.pid); await gate;
+    });
+    const pid = await acquired;
+    const pending = f.service.decide(f.context, DECISION_TEST_REQUEST);
+    try {
+      await vi.waitFor(async () => {
+        const [row] = await db.execute<{ count: number }>(sql`select count(*)::int as count from pg_stat_activity where ${pid} = any(pg_blocking_pids(pid))`);
+        expect(row.count).toBeGreaterThan(0);
+      }, { timeout: 5000 });
+      await db.update(companySecrets).set(change === "disabled" ? { status: "disabled" } : { latestVersion: secret.latestVersion + 1 }).where(eq(companySecrets.id, secret.id));
+    } finally { release(); await holding; }
+    expect(await pending).toMatchObject({ status: "unavailable", reason: "connection_unavailable" });
+    expect(f.provider).not.toHaveBeenCalled();
+    expect(await db.select().from(decisionInvocations).where(eq(decisionInvocations.companyId, f.companyId))).toHaveLength(0);
   });
   it("preserves sponsorship off when a deleted grant is replaced", async () => {
     const f = await fixture();

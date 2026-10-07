@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { and, desc, eq, gte, lt, lte, or, sql } from "drizzle-orm";
 import {
   agents, authUsers, budgetPolicies, budgetReservations, companies, companyMemberships, companyDecisionModels, costEvents,
-  decisionInvocations, heartbeatRuns, issues, projects, type Db,
+  decisionInvocations, heartbeatRuns, issues, projects, companySecrets, type Db,
 } from "@paperclipai/db";
 import {
   DECISION_MODELS, decisionProviderForConnection, decisionRequestSchema, updateDecisionModelSchema,
@@ -177,6 +177,10 @@ export function decisionModelService(db: Db, options: { provider?: typeof runDec
     let selected: Awaited<ReturnType<typeof resolve>>;
     try { selected = await resolve(context); }
     catch (error) { const reason = unavailableReason(error); if (reason) return { status: "unavailable", reason }; throw error; }
+    const secretId = selected.connection.grant.credentialSecretRefs.find(ref => ref.configPath === "ai.credential")?.secretId;
+    const [credentialSnapshot] = secretId ? await db.select({ id: companySecrets.id, status: companySecrets.status, version: companySecrets.latestVersion })
+      .from(companySecrets).where(and(eq(companySecrets.companyId, context.companyId), eq(companySecrets.id, secretId))) : [];
+    if (!credentialSnapshot || credentialSnapshot.status !== "active") return { status: "unavailable", reason: "connection_unavailable" };
     let credential: string;
     try { credential = await aiConnectionService(db).credential(selected.connection, 0, { responsibleUserId: selected.userId,
       actorType: selected.actorType, actorId: selected.actorId, issueId: selected.issueId, heartbeatRunId: selected.runId }); }
@@ -189,6 +193,13 @@ export function decisionModelService(db: Db, options: { provider?: typeof runDec
       if (current.config.updatedAt.getTime() !== selected.config.updatedAt.getTime() || current.userId !== selected.userId || current.identityContextId !== selected.identityContextId
         || current.connection.grant.updatedAt.getTime() !== selected.connection.grant.updatedAt.getTime()
         || current.connection.connection.updatedAt.getTime() !== selected.connection.connection.updatedAt.getTime())
+        return { reason: "connection_unavailable" as const };
+      // Secret changes do not update the connection revision. Serialize against
+      // rotation/revocation through admission, including time spent waiting for
+      // the accounting lock after credential resolution.
+      const [currentSecret] = await tx.select({ status: companySecrets.status, version: companySecrets.latestVersion }).from(companySecrets)
+        .where(and(eq(companySecrets.companyId, context.companyId), eq(companySecrets.id, credentialSnapshot.id))).for("share");
+      if (!currentSecret || currentSecret.status !== "active" || currentSecret.version !== credentialSnapshot.version)
         return { reason: "connection_unavailable" as const };
       const budgets = budgetServiceInTransaction(tx, publications);
       const block = await budgets.getInvocationBlock(context.companyId, current.agentId, { projectId: current.projectId });

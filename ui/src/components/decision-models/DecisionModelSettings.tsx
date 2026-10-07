@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DECISION_MODELS, type DecisionConnectionChoice, type DecisionModelSettings, type DecisionProvider, type DecisionResult, type UpdateDecisionModel } from "@paperclipai/shared";
 import { Link } from "@/lib/router";
@@ -27,10 +27,16 @@ export function DecisionModelSettingsView({ settings, choices, saving, testing, 
   onSave: (value: UpdateDecisionModel) => void; onTest: () => void; onAdd: () => void;
 }) {
   const [draft, setDraft] = useState<Required<UpdateDecisionModel>>(settings);
-  useEffect(() => { setDraft(settings); }, [settings]);
+  const appliedConnection = useRef<string | null>(null);
+  useEffect(() => { setDraft(settings); }, [settings.companyId, settings.connectionId, settings.grantId, settings.enabled, settings.allowBackground]);
   useEffect(() => {
+    if (!newlyConnectedId) { appliedConnection.current = null; return; }
+    if (appliedConnection.current === newlyConnectedId) return;
     const connection = choices.find(row => row.id === newlyConnectedId);
-    if (connection) setDraft(value => ({ ...value, connectionId: connection.id, grantId: connection.grantId, enabled: value.connectionId ? value.enabled : true }));
+    if (connection) {
+      appliedConnection.current = newlyConnectedId;
+      setDraft(value => ({ ...value, connectionId: connection.id, grantId: connection.grantId, enabled: value.connectionId ? value.enabled : true }));
+    }
   }, [newlyConnectedId, choices]);
   const selected = choices.find(row => row.grantId === draft.grantId);
   const dirty = draft.enabled !== settings.enabled || draft.allowBackground !== settings.allowBackground || draft.grantId !== settings.grantId;
