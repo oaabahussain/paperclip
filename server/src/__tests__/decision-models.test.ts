@@ -12,6 +12,7 @@ import {
 import { startEmbeddedPostgresTestDatabase } from "@paperclipai/db/test-embedded-postgres";
 import { DECISION_TEST_REQUEST, updateDecisionModelSchema, createCostEventSchema } from "@paperclipai/shared";
 import { aiConnectionService } from "../services/ai-connections.js";
+import { agentService } from "../services/agents.js";
 import { decisionModelService, settingsDecisionTest, defineDecisionFeature, type DecisionContext } from "../services/decision-models.js";
 import { decisionReceipt, type DecisionProviderOutcome } from "../services/decision-model-provider.js";
 import { costService } from "../services/costs.js";
@@ -156,6 +157,22 @@ describe("company decision service", () => {
     try { expect(await f.service.decide(f.context, DECISION_TEST_REQUEST)).toMatchObject({ status: "unavailable", reason: "budget_blocked" }); }
     finally { release(); }
     expect((await first).status).toBe("succeeded"); expect(f.provider).toHaveBeenCalledTimes(1);
+  });
+  it("blocks agent deletion while an in-flight or unknown decision retains a budget hold", async () => {
+    const f = await fixture(), runId = randomUUID();
+    await db.insert(heartbeatRuns).values({ id: runId, companyId: f.companyId, agentId: f.agentId, status: "running", invocationSource: "on_demand", responsibleUserId: "alice" });
+    await db.insert(budgetPolicies).values({ companyId: f.companyId, scopeType: "company", scopeId: f.companyId, windowKind: "calendar_month_utc", amount: 1, reservationCents: "1", notifyEnabled: false });
+    const context: DecisionContext = { companyId: f.companyId, feature: settingsDecisionTest,
+      actor: { type: "agent", agentId: f.agentId, runId, companyId: f.companyId, source: "agent_jwt" } };
+    const remove = () => agentService(db).remove(f.agentId);
+    f.provider.mockImplementationOnce(async () => {
+      await expect(remove()).rejects.toMatchObject({ status: 409, details: { code: "agent_decision_accounting_pending" } });
+      expect(await f.service.decide(f.context, DECISION_TEST_REQUEST)).toMatchObject({ status: "unavailable", reason: "budget_blocked" });
+      return { errorCode: "timeout", receipt: decisionReceipt("openai", null) };
+    });
+    expect((await f.service.decide(context, DECISION_TEST_REQUEST)).status).toBe("failed");
+    await expect(remove()).rejects.toMatchObject({ status: 409, details: { code: "agent_decision_accounting_pending" } });
+    expect((await db.select().from(budgetReservations).where(eq(budgetReservations.companyId, f.companyId)))[0]).toMatchObject({ state: "held", amountCents: "1.0000000" });
   });
   it("holds unknown billing until an audited correction, without rerunning the provider", async () => {
     const f = await fixture(); f.provider.mockResolvedValue({ errorCode: "timeout", receipt: decisionReceipt("openai", null) });
