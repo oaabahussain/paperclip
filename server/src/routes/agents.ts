@@ -5748,14 +5748,31 @@ export function agentRoutes(
         adapterConfig: patchData.adapterConfig,
       });
     }
-    if (existing.runtimeConfig.aiConnection && requestedRuntimeConfig && !requestedRuntimeConfig.aiConnection) requestedRuntimeConfig.aiConnection = existing.runtimeConfig.aiConnection;
-    const nextAiBinding = aiRuntimeConnectionBindingSchema.safeParse(requestedRuntimeConfig?.aiConnection ?? existing.runtimeConfig.aiConnection).data;
+    // runtimeConfig.aiConnection on update: an absent key preserves the stored
+    // binding (force re-attach below); an explicit null detaches it. Without
+    // the detach path there is no way to move a bound agent onto a harness
+    // that no AI connection supports (e.g. claude_local → pi_local): the
+    // force re-attach re-applies the binding and compatibility validation then
+    // rejects the whole update with a 422 loop.
+    if (existing.runtimeConfig.aiConnection && requestedRuntimeConfig && !hasOwn(requestedRuntimeConfig, "aiConnection")) requestedRuntimeConfig.aiConnection = existing.runtimeConfig.aiConnection;
+    else if (requestedRuntimeConfig && hasOwn(requestedRuntimeConfig, "aiConnection") && requestedRuntimeConfig.aiConnection == null) delete requestedRuntimeConfig.aiConnection;
+    let nextAiBinding = aiRuntimeConnectionBindingSchema.safeParse(requestedRuntimeConfig?.aiConnection ?? existing.runtimeConfig.aiConnection).data;
     if (nextAiBinding) {
       await assertCanUpdateAgent(req, existing);
       const changed = JSON.stringify(nextAiBinding) !== JSON.stringify(existing.runtimeConfig.aiConnection);
       const aiConfig = (patchData.adapterConfig ?? existing.adapterConfig) as Record<string, unknown>;
-      if (nextAiBinding.mode !== "router" && !isAiConnectionCompatible(nextAiBinding, requestedAdapterType, aiConfig.model, aiConfig.provider, aiConfig.acpxAgent)) throw unprocessable("Select an AI connection compatible with the new harness and model");
-      if (changed || (nextAiBinding.mode === "router" && requestedAdapterType !== existing.adapterType)) await validateManagedAgentBinding(req, existing.companyId, existing.id, requestedAdapterType, aiConfig, nextAiBinding, (patchData.defaultEnvironmentId !== undefined ? patchData.defaultEnvironmentId : existing.defaultEnvironmentId) as string | null, true);
+      if (nextAiBinding.mode !== "router" && !isAiConnectionCompatible(nextAiBinding, requestedAdapterType, aiConfig.model, aiConfig.provider, aiConfig.acpxAgent)) {
+        // Switching harnesses is a new selection: when a stored binding has no
+        // compatible path on the target adapter, drop it instead of stranding
+        // the agent on its old harness. Same-harness writes keep the 422 so
+        // callers learn the binding no longer fits the current model.
+        const changingAdapterType = hasOwn(patchData, "adapterType") && typeof patchData.adapterType === "string" && patchData.adapterType !== existing.adapterType;
+        if (!changingAdapterType) throw unprocessable("Select an AI connection compatible with the new harness and model");
+        if (!requestedRuntimeConfig) requestedRuntimeConfig = { ...(existing.runtimeConfig as Record<string, unknown>) };
+        delete requestedRuntimeConfig.aiConnection;
+        nextAiBinding = undefined;
+      }
+      if (nextAiBinding && (changed || (nextAiBinding.mode === "router" && requestedAdapterType !== existing.adapterType))) await validateManagedAgentBinding(req, existing.companyId, existing.id, requestedAdapterType, aiConfig, nextAiBinding, (patchData.defaultEnvironmentId !== undefined ? patchData.defaultEnvironmentId : existing.defaultEnvironmentId) as string | null, true);
     }
     if (requestedRuntimeConfig) patchData.runtimeConfig = requestedRuntimeConfig;
     if (touchesAdapterConfiguration || Object.prototype.hasOwnProperty.call(patchData, "defaultEnvironmentId")) {
