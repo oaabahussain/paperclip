@@ -6,11 +6,14 @@ import express from "express";
 import request from "supertest";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { agents, companies, companyMemberships, createDb, heartbeatRuns, principalPermissionGrants } from "@paperclipai/db";
+import { agents, companies, companyMemberships, createDb, heartbeatRuns, plugins, principalPermissionGrants } from "@paperclipai/db";
+import { type AiConnectionPoolMember, type PaperclipPluginManifestV1 } from "@paperclipai/shared";
 import { startEmbeddedPostgresTestDatabase } from "./helpers/embedded-postgres.js";
 import { agentRoutes } from "../routes/agents.js";
 import { errorHandler } from "../middleware/index.js";
 import { aiConnectionService } from "../services/ai-connections.js";
+import { aiConnectionRouterService } from "../services/ai-connection-router.js";
+import { instanceSettingsService } from "../services/instance-settings.js";
 import { getServerAdapter, registerServerAdapter } from "../adapters/index.js";
 
 let database: Awaited<ReturnType<typeof startEmbeddedPostgresTestDatabase>>;
@@ -125,5 +128,50 @@ describe("agent update detaches AI connections that cannot follow a harness swit
     expect(response.status, JSON.stringify(response.body)).toBe(422);
     const saved = await savedAgent(f.agentId);
     expect(saved.runtimeConfig.aiConnection).toEqual({ provider: "openrouter", method: "api_key", mode: "responsible_user" });
+  });
+
+  it("honors an explicit null detach when the same request selects a model the stored binding cannot serve", async () => {
+    const f = await fixture();
+    await db.update(agents).set({
+      adapterType: "opencode_local",
+      adapterConfig: { model: "openrouter/anthropic/claude-sonnet-5" },
+      runtimeConfig: { aiConnection: { provider: "openrouter", method: "api_key", mode: "responsible_user" } },
+    }).where(eq(agents.id, f.agentId));
+    const response = await request(f.app).patch(`/api/agents/${f.agentId}`).send({
+      adapterConfig: { model: "anthropic/claude-sonnet-5" },
+      runtimeConfig: { aiConnection: null },
+    });
+    expect(response.status, JSON.stringify(response.body)).toBe(200);
+    const saved = await savedAgent(f.agentId);
+    expect(saved.adapterType).toBe("opencode_local");
+    expect(saved.adapterConfig.model).toBe("anthropic/claude-sonnet-5");
+    expect(saved.runtimeConfig.aiConnection).toBeUndefined();
+  });
+
+  it("honors an explicit null detach when leaving a harness the router pool cannot serve", async () => {
+    const f = await fixture();
+    await instanceSettingsService(db).updateExperimental({ enableAiConnectionRouters: true });
+    const pluginKey = `fixture.detach-pool-${f.companyId}`;
+    const manifest: PaperclipPluginManifestV1 = { id: pluginKey, apiVersion: 1, version: "0.1.0", displayName: "Detach pool fixture", description: "Fixture", author: "Tests", categories: ["connector"], capabilities: ["ai.connections.route"], aiConnectionRouter: { name: "AI connection pool", description: "Fixture" }, entrypoints: { worker: "worker.js" } };
+    await db.insert(plugins).values({ pluginKey, packageName: pluginKey, version: "0.1.0", manifestJson: manifest, status: "ready" });
+    const account = await aiConnectionService(db).save(f.companyId, f.userId, {
+      provider: "openai", method: "api_key", name: "Detach pool member connection", ownership: "personal", agentIds: [f.agentId], allAgents: false, apiKey: "fixture-api-key",
+    }, "fixture-api-key");
+    const member: AiConnectionPoolMember = { id: randomUUID(), binding: { ...account, provider: "openai", method: "api_key", mode: "delegated" }, profile: { provider: "codex", model: "gpt-5.6-sol" } };
+    const pool = await aiConnectionRouterService(db).save(pluginKey, { companyId: f.companyId, config: { name: "Detach fixture pool", enabled: true, mode: "round_robin", thresholdPercent: 90, members: [member] } }, f.userId);
+    await db.update(agents).set({
+      adapterType: "codex_local",
+      adapterConfig: { model: "gpt-5.6-sol" },
+      runtimeConfig: { aiConnection: { mode: "router", connectionId: pool.id } },
+    }).where(eq(agents.id, f.agentId));
+    const response = await request(f.app).patch(`/api/agents/${f.agentId}`).send({
+      adapterType: "pi_local",
+      adapterConfig: { model: "zai/glm-5.3" },
+      runtimeConfig: { aiConnection: null },
+    });
+    expect(response.status, JSON.stringify(response.body)).toBe(200);
+    const saved = await savedAgent(f.agentId);
+    expect(saved.adapterType).toBe("pi_local");
+    expect(saved.runtimeConfig.aiConnection).toBeUndefined();
   });
 });

@@ -5754,9 +5754,14 @@ export function agentRoutes(
     // that no AI connection supports (e.g. claude_local → pi_local): the
     // force re-attach re-applies the binding and compatibility validation then
     // rejects the whole update with a 422 loop.
+    const explicitDetach = Boolean(requestedRuntimeConfig && hasOwn(requestedRuntimeConfig, "aiConnection") && requestedRuntimeConfig.aiConnection == null);
     if (existing.runtimeConfig.aiConnection && requestedRuntimeConfig && !hasOwn(requestedRuntimeConfig, "aiConnection")) requestedRuntimeConfig.aiConnection = existing.runtimeConfig.aiConnection;
-    else if (requestedRuntimeConfig && hasOwn(requestedRuntimeConfig, "aiConnection") && requestedRuntimeConfig.aiConnection == null) delete requestedRuntimeConfig.aiConnection;
-    let nextAiBinding = aiRuntimeConnectionBindingSchema.safeParse(requestedRuntimeConfig?.aiConnection ?? existing.runtimeConfig.aiConnection).data;
+    else if (explicitDetach) delete requestedRuntimeConfig!.aiConnection;
+    // An explicit detach leaves no binding to re-attach or validate: parsing
+    // with the `?? existing` fallback would resurrect the removed binding and
+    // still reject a detach that also changes the model or harness (e.g.
+    // dropping a router pool while moving to a harness it cannot serve).
+    let nextAiBinding = explicitDetach ? undefined : aiRuntimeConnectionBindingSchema.safeParse(requestedRuntimeConfig?.aiConnection ?? existing.runtimeConfig.aiConnection).data;
     if (nextAiBinding) {
       await assertCanUpdateAgent(req, existing);
       const changed = JSON.stringify(nextAiBinding) !== JSON.stringify(existing.runtimeConfig.aiConnection);
